@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Spotify artiesten naar playlist</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="wrap">
+  <header><p class="eyebrow">GitHub Pages + Spotify Web API</p><h1>Artiesten naar Spotify-playlist</h1><p>Geef één artiest per regel op. De app zoekt per artiest maximaal <strong>x</strong> tracks en maakt een playlist in je account.</p></header>
+  <section class="card">
+    <h2>1. Spotify koppelen</h2>
+    <p class="muted">Client ID: <code id="clientIdView"></code></p>
+    <p class="muted">Redirect URI die je exact in Spotify moet registreren:</p>
+    <div class="copyrow"><code id="redirectUri"></code><button id="copyRedirect" class="secondary">Kopieer</button></div>
+    <div class="actions"><button id="loginBtn">Log in met Spotify</button><button id="logoutBtn" class="secondary">Uitloggen</button></div>
+    <p id="authStatus" class="status">Niet verbonden.</p>
+  </section>
+  <section class="card">
+    <h2>2. Playlist instellen</h2>
+    <label>Naam<input id="playlistName" value="Toptracks van mijn artiesten"></label>
+    <div class="grid">
+      <label>Aantal tracks per artiest<input id="tracksPerArtist" type="number" min="1" max="10" value="3"></label>
+      <label>Markt<input id="market" maxlength="2" value="BE" placeholder="BE"></label>
+      <label>Pauze tussen artiesten (ms)<input id="delayMs" type="number" min="0" step="250" value="1000"></label>
+    </div>
+    <label class="check"><input id="isPublic" type="checkbox"> Openbare playlist</label>
+    <label>Artiesten, één per regel<textarea id="artists" rows="12" placeholder="Radiohead&#10;Big Thief&#10;Turnstile"></textarea></label>
+    <p class="notice"><strong>Belangrijk:</strong> Spotify heeft “Get Artist’s Top Tracks” in februari 2026 verwijderd voor Development Mode. Deze app probeert eerst de officiële top-tracks-endpoint. Als die niet beschikbaar is, gebruikt hij de hoogst gerangschikte Spotify-zoekresultaten voor de exacte artiest. Dat is een benadering, geen officiële toplijst.</p>
+    <div class="actions"><button id="createBtn">Maak playlist</button><button id="stopBtn" class="danger">Stop</button></div>
+  </section>
+  <section class="card"><h2>Voortgang</h2><progress id="progress" max="100" value="0"></progress><pre id="log">Klaar om te starten.</pre><p id="playlistLink"></p></section>
+  <section class="card"><h2>Resultaten</h2><div class="tablewrap"><table><thead><tr><th>Invoer</th><th>Gevonden artiest</th><th>Tracks</th><th>Methode</th><th>Status</th></tr></thead><tbody id="results"></tbody></table></div></section>
+</main>
+<script type="module" src="app.js"></script>
+</body></html>
