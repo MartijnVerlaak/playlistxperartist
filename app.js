@@ -69,20 +69,31 @@ function addCandidates(tracks){
 
     if(selected.length >= count) break;
 
-    const trackKey =
-      artist.id + "|" + normalizeTrackName(track.name);
+    const isrc = track.external_ids?.isrc || "";
+    const normalizedName = normalizeTrackName(track.name);
+
+    const isrcKey = isrc
+      ? artist.id + "|isrc|" + isrc
+      : null;
+
+    const nameKey =
+      artist.id + "|name|" + normalizedName;
 
     if(
       !track?.uri ||
-      seenHere.has(trackKey)
+      (isrcKey && seenHere.has(isrcKey)) ||
+      seenHere.has(nameKey)
     ){
       continue;
     }
 
-    seenHere.add(trackKey);
+    if(isrcKey) seenHere.add(isrcKey);
+    seenHere.add(nameKey);
+
     selected.push(track);
   }
 }
+
 
   try{
     const d=await api(`/artists/${encodeURIComponent(artist.id)}/top-tracks?market=${encodeURIComponent(market)}`);
