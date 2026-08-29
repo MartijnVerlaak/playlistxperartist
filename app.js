@@ -51,31 +51,57 @@ async function exactArtist(name){
   const d=await api(`/search?${new URLSearchParams({q:name,type:"artist",limit:"10"})}`); const items=d.artists?.items||[];
   return items.find(a=>a.name.localeCompare(name,undefined,{sensitivity:"base"})===0)||items[0]||null;
 }
-async function tracksFor(artist,count,market){
+async function tracksFor(artist,count,market,usedUris){
+  const selected=[];
+  const seenHere=new Set();
+  let usedOfficial=false;
+
+  function addCandidates(tracks){
+    for(const track of tracks||[]){
+      if(selected.length>=count) break;
+      if(!track?.uri || usedUris.has(track.uri) || seenHere.has(track.uri)) continue;
+      seenHere.add(track.uri);
+      selected.push(track);
+    }
+  }
+
   try{
     const d=await api(`/artists/${encodeURIComponent(artist.id)}/top-tracks?market=${encodeURIComponent(market)}`);
-    if(d.tracks?.length) return {tracks:d.tracks.slice(0,count),method:"officiële toptracks"};
-  }catch(e){ if(![403,404].includes(e.status)) log(`Toptracks voor ${artist.name}: ${e.message}. Zoekfallback wordt gebruikt.`); }
-  const q=`artist:\"${artist.name.replaceAll('"','')}\"`;
-  let all=[]; for(let offset=0;all.length<count && offset<50;offset+=10){
-    const d=await api(`/search?${new URLSearchParams({q,type:"track",market,limit:"10",offset:String(offset)})}`);
-    const batch=(d.tracks?.items||[]).filter(t=>t.artists?.some(a=>a.id===artist.id)); all.push(...batch); if(!d.tracks?.next) break;
+    if(d.tracks?.length){
+      usedOfficial=true;
+      addCandidates(d.tracks);
+    }
+  }catch(e){
+    if(![403,404].includes(e.status)) log(`Toptracks voor ${artist.name}: ${e.message}. Zoekfallback wordt gebruikt.`);
   }
-  const seen=new Set(); all=all.filter(t=>!seen.has(t.id)&&seen.add(t.id));
-  return {tracks:all.slice(0,count),method:"Spotify-zoekrangschikking (benadering)"};
+
+  if(selected.length<count){
+    const q=`artist:\"${artist.name.replaceAll('"','')}\"`;
+    for(let offset=0;selected.length<count && offset<=100;offset+=10){
+      const d=await api(`/search?${new URLSearchParams({q,type:"track",market,limit:"10",offset:String(offset)})}`);
+      const batch=(d.tracks?.items||[]).filter(t=>t.artists?.some(a=>a.id===artist.id));
+      addCandidates(batch);
+      if(!d.tracks?.next) break;
+    }
+  }
+
+  const method=usedOfficial
+    ? (selected.length<count ? "officiële toptracks + Spotify-zoekrangschikking" : "officiële toptracks")
+    : "Spotify-zoekrangschikking (benadering)";
+  return {tracks:selected,method};
 }
 function addRow(input,artist,tracks,method,status){ const tr=document.createElement("tr"); tr.innerHTML=`<td>${esc(input)}</td><td>${esc(artist?.name||"-")}</td><td>${tracks.map(t=>`<a target="_blank" rel="noopener" href="${esc(t.external_urls?.spotify||'#')}">${esc(t.name)}</a>`).join("<br>")||"-"}</td><td>${esc(method||"-")}</td><td>${esc(status)}</td>`; $("results").appendChild(tr); }
 async function createPlaylist(){
   stopRequested=false; $("results").innerHTML=""; $("playlistLink").innerHTML=""; $("log").textContent="Start...";
   const names=$("artists").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean); if(!names.length) return log("Geen artiesten ingevuld.");
-  const count=Math.max(1,Math.min(10,Number($("tracksPerArtist").value)||1)); const market=($("market").value||"BE").trim().toUpperCase(); const uris=[];
+  const count=Math.max(1,Math.min(10,Number($("tracksPerArtist").value)||1)); const market=($("market").value||"BE").trim().toUpperCase(); const uris=[]; const usedUris=new Set();
   $("createBtn").disabled=true;
   try{
     await accessToken();
     for(let i=0;i<names.length;i++){
       if(stopRequested) throw new Error("Verwerking gestopt door gebruiker.");
       $("progress").value=Math.round(i/names.length*80); const name=names[i]; log(`Zoeken: ${name}`);
-      try{ const artist=await exactArtist(name); if(!artist){addRow(name,null,[],"","Artiest niet gevonden");continue} const result=await tracksFor(artist,count,market); result.tracks.forEach(t=>uris.push(t.uri)); addRow(name,artist,result.tracks,result.method,result.tracks.length?"OK":"Geen tracks gevonden"); }
+      try{ const artist=await exactArtist(name); if(!artist){addRow(name,null,[],"","Artiest niet gevonden");continue} const result=await tracksFor(artist,count,market,usedUris); result.tracks.forEach(t=>{ usedUris.add(t.uri); uris.push(t.uri); }); const status=result.tracks.length===count?"OK":`${result.tracks.length}/${count} unieke tracks gevonden`; addRow(name,artist,result.tracks,result.method,status); }
       catch(e){ addRow(name,null,[],"",e.message); log(`${name}: ${e.message}`); if(String(e.message).includes("QUOTA_EXCEEDED")) throw e; }
       await sleep(Math.max(0,Number($("delayMs").value)||0));
     }
