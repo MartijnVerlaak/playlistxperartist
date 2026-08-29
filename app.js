@@ -52,18 +52,37 @@ async function exactArtist(name){
   return items.find(a=>a.name.localeCompare(name,undefined,{sensitivity:"base"})===0)||items[0]||null;
 }
 async function tracksFor(artist,count,market,usedUris){
-  const selected=[];
-  const seenHere=new Set();
+const selected=[];
+const seenHere=new Set();
+
+function normalizeTrackName(name){
+  return name
+    .toLowerCase()
+    .replace(/\s*\(.*?(remaster|remastered|deluxe|single version|album version).*?\)/gi, "")
+    .replace(/\s*-\s*(remaster|remastered|deluxe|single version|album version).*$/gi, "")
+    .trim();
+}
   let usedOfficial=false;
 
-  function addCandidates(tracks){
-    for(const track of tracks||[]){
-      if(selected.length>=count) break;
-      if(!track?.uri || usedUris.has(track.uri) || seenHere.has(track.uri)) continue;
-      seenHere.add(track.uri);
-      selected.push(track);
+function addCandidates(tracks){
+  for(const track of tracks || []){
+
+    if(selected.length >= count) break;
+
+    const trackKey =
+      artist.id + "|" + normalizeTrackName(track.name);
+
+    if(
+      !track?.uri ||
+      seenHere.has(trackKey)
+    ){
+      continue;
     }
+
+    seenHere.add(trackKey);
+    selected.push(track);
   }
+}
 
   try{
     const d=await api(`/artists/${encodeURIComponent(artist.id)}/top-tracks?market=${encodeURIComponent(market)}`);
@@ -94,14 +113,18 @@ function addRow(input,artist,tracks,method,status){ const tr=document.createElem
 async function createPlaylist(){
   stopRequested=false; $("results").innerHTML=""; $("playlistLink").innerHTML=""; $("log").textContent="Start...";
   const names=$("artists").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean); if(!names.length) return log("Geen artiesten ingevuld.");
-  const count=Math.max(1,Math.min(10,Number($("tracksPerArtist").value)||1)); const market=($("market").value||"BE").trim().toUpperCase(); const uris=[]; const usedUris=new Set();
+  const count=Math.max(1,Math.min(10,Number($("tracksPerArtist").value)||1)); const market=($("market").value||"BE").trim().toUpperCase(); const uris=[];
   $("createBtn").disabled=true;
   try{
     await accessToken();
     for(let i=0;i<names.length;i++){
       if(stopRequested) throw new Error("Verwerking gestopt door gebruiker.");
       $("progress").value=Math.round(i/names.length*80); const name=names[i]; log(`Zoeken: ${name}`);
-      try{ const artist=await exactArtist(name); if(!artist){addRow(name,null,[],"","Artiest niet gevonden");continue} const result=await tracksFor(artist,count,market,usedUris); result.tracks.forEach(t=>{ usedUris.add(t.uri); uris.push(t.uri); }); const status=result.tracks.length===count?"OK":`${result.tracks.length}/${count} unieke tracks gevonden`; addRow(name,artist,result.tracks,result.method,status); }
+      try{ const artist=await exactArtist(name); if(!artist){addRow(name,null,[],"","Artiest niet gevonden");continue} const result=await tracksFor(artist,count,market);
+
+result.tracks.forEach(t=>{
+  uris.push(t.uri);
+}); const status=result.tracks.length===count?"OK":`${result.tracks.length}/${count} unieke tracks gevonden`; addRow(name,artist,result.tracks,result.method,status); }
       catch(e){ addRow(name,null,[],"",e.message); log(`${name}: ${e.message}`); if(String(e.message).includes("QUOTA_EXCEEDED")) throw e; }
       await sleep(Math.max(0,Number($("delayMs").value)||0));
     }
