@@ -101,10 +101,18 @@ function addCandidates(tracks){
       usedOfficial=true;
       addCandidates(d.tracks);
     }
-  }catch(e){
-    if(![403,404].includes(e.status)) log(`Toptracks voor ${artist.name}: ${e.message}. Zoekfallback wordt gebruikt.`);
+}catch(e){
+  if(String(e.message).includes("QUOTA_EXCEEDED")){
+    throw e;
   }
 
+  if(![403,404].includes(e.status)){
+    log(
+      `Toptracks voor ${artist.name}: ${e.message}. ` +
+      `Zoekfallback wordt gebruikt.`
+    );
+  }
+}
   if(selected.length<count){
     const q=`artist:\"${artist.name.replaceAll('"','')}\"`;
     for(let offset=0;selected.length<count && offset<=100;offset+=10){
@@ -122,64 +130,185 @@ function addCandidates(tracks){
 }
 function addRow(input,artist,tracks,method,status){ const tr=document.createElement("tr"); tr.innerHTML=`<td>${esc(input)}</td><td>${esc(artist?.name||"-")}</td><td>${tracks.map(t=>`<a target="_blank" rel="noopener" href="${esc(t.external_urls?.spotify||'#')}">${esc(t.name)}</a>`).join("<br>")||"-"}</td><td>${esc(method||"-")}</td><td>${esc(status)}</td>`; $("results").appendChild(tr); }
 async function createPlaylist(){
-  let quotaReached = false;
-  stopRequested=false;
+  stopRequested = false;
   let quotaReached = false;
 
-  $("results").innerHTML="";
-  $("playlistLink").innerHTML="";
-  $("log").textContent="Start...";
-  const names=$("artists").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean); if(!names.length) return log("Geen artiesten ingevuld.");
-  const count=Math.max(1,Math.min(10,Number($("tracksPerArtist").value)||1)); const market=($("market").value||"BE").trim().toUpperCase(); const uris=[];
-  $("createBtn").disabled=true;
+  $("results").innerHTML = "";
+  $("playlistLink").innerHTML = "";
+  $("log").textContent = "Start...";
+
+  const names = $("artists").value
+    .split(/\r?\n/)
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  if(!names.length){
+    log("Geen artiesten ingevuld.");
+    return;
+  }
+
+  const count = Math.max(
+    1,
+    Math.min(10, Number($("tracksPerArtist").value) || 1)
+  );
+
+  const market = ($("market").value || "BE")
+    .trim()
+    .toUpperCase();
+
+  const uris = [];
+
+  $("createBtn").disabled = true;
+
   try{
     await accessToken();
-    for(let i=0;i<names.length;i++){
-      if(stopRequested) throw new Error("Verwerking gestopt door gebruiker.");
-      $("progress").value=Math.round(i/names.length*80); const name=names[i]; log(`Zoeken: ${name}`);
-      try{ const artist=await exactArtist(name); if(!artist){addRow(name,null,[],"","Artiest niet gevonden");continue} const result=await tracksFor(artist,count,market);
 
-result.tracks.forEach(t=>{
-  uris.push(t.uri);
-}); const status=result.tracks.length===count?"OK":`${result.tracks.length}/${count} unieke tracks gevonden`; addRow(name,artist,result.tracks,result.method,status); }
-     catch(e){
-  addRow(name,null,[],"",e.message);
-  log(`${name}: ${e.message}`);
+    for(let i = 0; i < names.length; i++){
+      if(stopRequested){
+        throw new Error("Verwerking gestopt door gebruiker.");
+      }
 
-  if(String(e.message).includes("QUOTA_EXCEEDED")){
-    log("Spotify-quota bereikt. Huidige resultaten worden opgeslagen in een playlist.");
-    break;
-  }
-}
-      await sleep(Math.max(0,Number($("delayMs").value)||0));
+      $("progress").value = Math.round(i / names.length * 80);
+
+      const name = names[i];
+      log(`Zoeken: ${name}`);
+
+      try{
+        const artist = await exactArtist(name);
+
+        if(!artist){
+          addRow(
+            name,
+            null,
+            [],
+            "",
+            "Artiest niet gevonden"
+          );
+          continue;
+        }
+
+        const result = await tracksFor(
+          artist,
+          count,
+          market
+        );
+
+        result.tracks.forEach(track => {
+          if(track?.uri && !uris.includes(track.uri)){
+            uris.push(track.uri);
+          }
+        });
+
+        const status =
+          result.tracks.length === count
+            ? "OK"
+            : `${result.tracks.length}/${count} unieke tracks gevonden`;
+
+        addRow(
+          name,
+          artist,
+          result.tracks,
+          result.method,
+          status
+        );
+
+      }catch(e){
+        addRow(name, null, [], "", e.message);
+        log(`${name}: ${e.message}`);
+
+        if(String(e.message).includes("QUOTA_EXCEEDED")){
+          quotaReached = true;
+
+          log(
+            "Spotify-ontwikkelaarsquota bereikt. " +
+            "Het zoeken wordt gestopt en er wordt geprobeerd " +
+            "een playlist te maken met de reeds gevonden tracks."
+          );
+
+          break;
+        }
+      }
+
+      await sleep(
+        Math.max(0, Number($("delayMs").value) || 0)
+      );
     }
-   if(!uris.length){
-  throw new Error("Geen passende tracks gevonden. Er is geen playlist aangemaakt.");
-}
-    const p=await api("/me/playlists",{method:"POST",body:JSON.stringify({name:$("playlistName").value.trim()||"Artiestenplaylist",public:$("isPublic").checked,description:"Gemaakt met Spotify Artiesten naar Playlist"})});
-    for(let i=0;i<uris.length;i+=100){
-  try{
-    await api(`/playlists/${p.id}/items`,{
-      method:"POST",
-      body:JSON.stringify({uris:uris.slice(i,i+100)})
+
+    if(!uris.length){
+      throw new Error(
+        "Geen passende tracks gevonden. Er is geen playlist aangemaakt."
+      );
+    }
+
+    log(`Playlist aanmaken met ${uris.length} gevonden tracks...`);
+
+    const p = await api("/me/playlists", {
+      method: "POST",
+      body: JSON.stringify({
+        name:
+          $("playlistName").value.trim() ||
+          "Artiestenplaylist",
+        public: $("isPublic").checked,
+        description:
+          quotaReached
+            ? "Gedeeltelijke playlist wegens Spotify-quotabeperking"
+            : "Gemaakt met Spotify Artiesten naar Playlist"
+      })
     });
-  }catch(e){
-    if(String(e.message).includes("QUOTA_EXCEEDED")){
-      log("Spotify-quota bereikt tijdens toevoegen van tracks.");
-      break;
+
+    let addedTrackCount = 0;
+
+    for(let i = 0; i < uris.length; i += 100){
+      const batch = uris.slice(i, i + 100);
+
+      try{
+        await api(`/playlists/${p.id}/items`, {
+          method: "POST",
+          body: JSON.stringify({
+            uris: batch
+          })
+        });
+
+        addedTrackCount += batch.length;
+
+      }catch(e){
+        if(String(e.message).includes("QUOTA_EXCEEDED")){
+          quotaReached = true;
+
+          log(
+            "Spotify-ontwikkelaarsquota bereikt tijdens " +
+            "het toevoegen van tracks. De playlist bevat mogelijk " +
+            "slechts een deel van de gevonden tracks."
+          );
+
+          break;
+        }
+
+        throw e;
+      }
     }
-    throw e;
+
+    $("progress").value = 100;
+
+    $("playlistLink").innerHTML =
+      `Klaar: <a target="_blank" rel="noopener" ` +
+      `href="${esc(p.external_urls.spotify)}">` +
+      `open de playlist in Spotify</a>`;
+
+    if(quotaReached){
+      log(
+        `Gedeeltelijke playlist aangemaakt. ` +
+        `${addedTrackCount} tracks toegevoegd voordat het quota werd bereikt.`
+      );
+    }else{
+      log(`${addedTrackCount} tracks toegevoegd.`);
+    }
+
+  }catch(e){
+    log(`Gestopt: ${e.message}`);
+  }finally{
+    $("createBtn").disabled = false;
   }
-}
-
-if(quotaReached){
-  log("Playlist aangemaakt met gedeeltelijke resultaten wegens Spotify-quotabeperking.");
-}
-
-$("progress").value=100;
-`` $("playlistLink").innerHTML=`Klaar: <a target="_blank" rel="noopener" href="${esc(p.external_urls.spotify)}">open de playlist in Spotify</a>`; log(`${uris.length} tracks toegevoegd.`);
-  }catch(e){ log(`Gestopt: ${e.message}`); }
-  finally{$("createBtn").disabled=false;}
 }
 async function init(){
   $("clientIdView").textContent=CLIENT_ID; $("redirectUri").textContent=redirectUri();
