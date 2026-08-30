@@ -8,7 +8,15 @@ let stopRequested = false;
 function redirectUri(){ return location.origin + location.pathname; }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 function log(msg){ $("log").textContent += `\n${new Date().toLocaleTimeString()}  ${msg}`; $("log").scrollTop=$("log").scrollHeight; }
-function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":["&gt;"],"\"":"&quot;","'":"&#39;"}[c])); }
+function esc(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[c]));
+}
 function b64url(bytes){ return btoa(String.fromCharCode(...bytes)).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_'); }
 function randomString(n=64){ return b64url(crypto.getRandomValues(new Uint8Array(n))).slice(0,n); }
 async function challenge(verifier){ return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier)))); }
