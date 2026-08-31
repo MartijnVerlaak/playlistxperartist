@@ -55,9 +55,80 @@ async function api(path,options={},retry=0){
   if(!r.ok){ const e=new Error(data?.error?.message||data?.error_description||`Spotify-fout ${r.status}`); e.status=r.status; throw e; }
   return data;
 }
+function normalizeArtistName(name){
+  return String(name || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/\b(the|official|music|band)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function levenshteinDistance(a,b){
+  const rows=a.length+1;
+  const cols=b.length+1;
+  const matrix=Array.from({length:rows},()=>Array(cols).fill(0));
+
+  for(let i=0;i<rows;i++) matrix[i][0]=i;
+  for(let j=0;j<cols;j++) matrix[0][j]=j;
+
+  for(let i=1;i<rows;i++){
+    for(let j=1;j<cols;j++){
+      const cost=a[i-1]===b[j-1]?0:1;
+      matrix[i][j]=Math.min(
+        matrix[i-1][j]+1,
+        matrix[i][j-1]+1,
+        matrix[i-1][j-1]+cost
+      );
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+function artistNameSimilarity(inputName,resultName){
+  const a=normalizeArtistName(inputName);
+  const b=normalizeArtistName(resultName);
+  if(!a || !b) return 0;
+  if(a===b) return 1;
+
+  const distance=levenshteinDistance(a,b);
+  const characterScore=1-distance/Math.max(a.length,b.length);
+
+  const wordsA=new Set(a.split(" ").filter(Boolean));
+  const wordsB=new Set(b.split(" ").filter(Boolean));
+  const intersection=[...wordsA].filter(word=>wordsB.has(word)).length;
+  const union=new Set([...wordsA,...wordsB]).size;
+  const wordScore=union?intersection/union:0;
+
+  return Math.max(characterScore,wordScore);
+}
+
 async function exactArtist(name){
-  const d=await api(`/search?${new URLSearchParams({q:name,type:"artist",limit:"10"})}`); const items=d.artists?.items||[];
-  return items.find(a=>a.name.localeCompare(name,undefined,{sensitivity:"base"})===0)||items[0]||null;
+  const d=await api(`/search?${new URLSearchParams({q:name,type:"artist",limit:"10"})}`);
+  const items=d.artists?.items||[];
+
+  const ranked=items
+    .map(artist=>({
+      artist,
+      similarity:artistNameSimilarity(name,artist.name)
+    }))
+    .sort((a,b)=>b.similarity-a.similarity);
+
+  const best=ranked[0];
+  if(!best || best.similarity<0.80){
+    if(best){
+      log(`Overgeslagen: "${name}" leek slechts ${Math.round(best.similarity*100)}% op Spotify-artiest "${best.artist.name}".`);
+    }
+    return null;
+  }
+
+  if(best.similarity<1){
+    log(`Artiestmatch: "${name}" -> "${best.artist.name}" (${Math.round(best.similarity*100)}%).`);
+  }
+  return best.artist;
 }
 async function tracksFor(artist,count,market,usedUris){
 const selected=[];
